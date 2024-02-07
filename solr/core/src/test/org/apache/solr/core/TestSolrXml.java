@@ -85,7 +85,8 @@ public class TestSolrXml extends SolrTestCaseJ4 {
     assertEquals("core sorter class", "testCoreSorter", cfg.getCoreSorterClass());
     assertEquals("core load threads", 11, cfg.getCoreLoadThreadCount(false));
     assertEquals("replay update threads", 100, cfg.getReplayUpdatesThreads());
-    assertThat(
+    assertEquals("index searcher executor threads", 7, cfg.getIndexSearcherExecutorThreads());
+    MatcherAssert.assertThat(
         "core root dir",
         cfg.getCoreRootDirectory().toString(),
         containsString("testCoreRootDirectory"));
