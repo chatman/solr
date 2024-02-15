@@ -2250,7 +2250,7 @@ public class SolrIndexSearcher extends IndexSearcher implements Closeable, SolrI
         MaxScoreCollector maxScoreCollector = null;
         List<Collector> collectors = new ArrayList<>(Arrays.asList(topCollector, setCollector));
 
-        if ((cmd.getFlags() & GET_SCORES) != 0) {
+        if (needScores) {
           maxScoreCollector = new MaxScoreCollector();
           collectors.add(maxScoreCollector);
         }
@@ -2265,9 +2265,7 @@ public class SolrIndexSearcher extends IndexSearcher implements Closeable, SolrI
         assert (totalHits == set.size()) || qr.isPartialResults();
 
         topDocs = topCollector.topDocs(0, len);
-        if (cmd.getSort() != null
-            && !(cmd.getQuery() instanceof RankQuery)
-            && (cmd.getFlags() & GET_SCORES) != 0) {
+        if (cmd.getSort() != null && !(cmd.getQuery() instanceof RankQuery) && needScores) {
           TopFieldCollector.populateScores(topDocs.scoreDocs, this, query);
         }
         populateNextCursorMarkFromTopDocs(qr, cmd, topDocs);
@@ -2278,7 +2276,7 @@ public class SolrIndexSearcher extends IndexSearcher implements Closeable, SolrI
       } else {
         log.debug("using CollectorManager");
 
-        boolean needMaxScore = (cmd.getFlags() & GET_SCORES) != 0;
+        boolean needMaxScore = needScores;
         SearchResult searchResult =
             searchCollectorManagers(len, cmd, query, true, needMaxScore, true);
         Object[] res = searchResult.result;
@@ -2303,7 +2301,7 @@ public class SolrIndexSearcher extends IndexSearcher implements Closeable, SolrI
 
         populateNextCursorMarkFromTopDocs(qr, cmd, topDocs);
         //        if (cmd.getSort() != null && !(cmd.getQuery() instanceof RankQuery) &&
-        // (cmd.getFlags() & GET_SCORES) != 0) {
+        // needScores) {
         //          TopFieldCollector.populateScores(topDocs.scoreDocs, this, query);
         //        }
         // nDocsReturned = topDocs.scoreDocs.length;
