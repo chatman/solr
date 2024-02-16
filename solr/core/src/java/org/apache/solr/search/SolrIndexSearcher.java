@@ -1985,7 +1985,6 @@ public class SolrIndexSearcher extends IndexSearcher implements Closeable, SolrI
       boolean needDocSet)
       throws IOException {
     Collection<CollectorManager<Collector, Object>> collectors = new ArrayList<>();
-    ScoreMode scoreMode = null;
 
     Collector[] firstCollectors = new Collector[3];
 
@@ -2106,15 +2105,6 @@ public class SolrIndexSearcher extends IndexSearcher implements Closeable, SolrI
             }
           });
     }
-    for (Collector collector : firstCollectors) {
-      if (collector != null) {
-        if (scoreMode == null) {
-          scoreMode = collector.scoreMode();
-        } else if (scoreMode != collector.scoreMode()) {
-          scoreMode = ScoreMode.COMPLETE;
-        }
-      }
-    }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     CollectorManager<Collector, Object>[] colls = collectors.toArray(new CollectorManager[0]);
@@ -2131,6 +2121,17 @@ public class SolrIndexSearcher extends IndexSearcher implements Closeable, SolrI
         throw (RuntimeException) ex.getCause().getCause();
       } else {
         throw ex;
+      }
+    }
+
+    ScoreMode scoreMode = null;
+    for (Collector collector : firstCollectors) {
+      if (collector != null) {
+        if (scoreMode == null) {
+          scoreMode = collector.scoreMode();
+        } else if (scoreMode != collector.scoreMode()) {
+          scoreMode = ScoreMode.COMPLETE;
+        }
       }
     }
 
