@@ -1928,11 +1928,9 @@ public class SolrIndexSearcher extends IndexSearcher implements Closeable, SolrI
             searchCollectorManagers(len, cmd, query, true, needScores, false);
         scoreModeUsed = searchResult.scoreMode;
 
-        final Object[] res = searchResult.result;
-        final TopDocsResult result = (TopDocsResult) res[0];
-
-        totalHits = result.totalHits;
-        topDocs = result.topDocs;
+        TopDocsResult topDocsResult = searchResult.getTopDocsResult();
+        totalHits = topDocsResult.totalHits;
+        topDocs = topDocsResult.topDocs;
 
         maxScore = searchResult.getMaxScore(totalHits);
       }
@@ -2162,6 +2160,15 @@ public class SolrIndexSearcher extends IndexSearcher implements Closeable, SolrI
       this.result = result;
     }
 
+    public TopDocsResult getTopDocsResult() {
+      for (Object res : result) {
+        if (res instanceof TopDocsResult) {
+          return (TopDocsResult) res;
+        }
+      }
+      return null;
+    }
+
     public float getMaxScore(int totalHits) {
       if (totalHits > 0) {
         for (Object res : result) {
@@ -2287,10 +2294,9 @@ public class SolrIndexSearcher extends IndexSearcher implements Closeable, SolrI
         boolean needMaxScore = needScores;
         SearchResult searchResult =
             searchCollectorManagers(len, cmd, query, true, needMaxScore, true);
-        Object[] res = searchResult.result;
-        TopDocsResult result = (TopDocsResult) res[0];
-        totalHits = result.totalHits;
-        topDocs = result.topDocs;
+        TopDocsResult topDocsResult = searchResult.getTopDocsResult();
+        totalHits = topDocsResult.totalHits;
+        topDocs = topDocsResult.topDocs;
         maxScore = searchResult.getMaxScore(totalHits);
         set = searchResult.getDocSet();
 
