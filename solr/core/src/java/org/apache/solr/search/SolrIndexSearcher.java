@@ -1934,12 +1934,7 @@ public class SolrIndexSearcher extends IndexSearcher implements Closeable, SolrI
         totalHits = result.totalHits;
         topDocs = result.topDocs;
 
-        if (res.length > 1) {
-          MaxScoreResult result2 = (MaxScoreResult) res[1];
-          maxScore = totalHits > 0 ? result2.maxScore : 0.0f;
-        } else {
-          maxScore = Float.NaN;
-        }
+        maxScore = searchResult.getMaxScore(totalHits);
       }
 
       hitsRelation = populateScoresIfNeeded(cmd, needScores, topDocs, query, scoreModeUsed);
@@ -2166,6 +2161,19 @@ public class SolrIndexSearcher extends IndexSearcher implements Closeable, SolrI
       this.scoreMode = scoreMode;
       this.result = result;
     }
+
+    public float getMaxScore(int totalHits) {
+      if (totalHits > 0) {
+        for (Object res : result) {
+          if (res instanceof MaxScoreResult) {
+            return ((MaxScoreResult) res).maxScore;
+          }
+        }
+        return Float.NaN;
+      } else {
+        return 0.0f;
+      }
+    }
   }
 
   // any DocSet returned is for the query only, without any filtering... that way it may
@@ -2175,11 +2183,11 @@ public class SolrIndexSearcher extends IndexSearcher implements Closeable, SolrI
     int last = len;
     if (last < 0 || last > maxDoc()) last = maxDoc();
     final int lastDocRequested = last;
-    int nDocsReturned;
-    int totalHits;
-    float maxScore = Float.NaN;
-    int[] ids;
-    float[] scores;
+    final int nDocsReturned;
+    final int totalHits;
+    final float maxScore;
+    final int[] ids;
+    final float[] scores;
     DocSet set = null;
 
     final boolean needScores = (cmd.getFlags() & GET_SCORES) != 0;
@@ -2274,11 +2282,8 @@ public class SolrIndexSearcher extends IndexSearcher implements Closeable, SolrI
         TopDocsResult result = (TopDocsResult) res[0];
         totalHits = result.totalHits;
         topDocs = result.topDocs;
+        maxScore = searchResult.getMaxScore(totalHits);
         if (needMaxScore) {
-          if (res.length > 1) {
-            MaxScoreResult result2 = (MaxScoreResult) res[1];
-            maxScore = totalHits > 0 ? result2.maxScore : 0.0f;
-          }
           if (res.length > 2) {
             DocSetResult result3 = (DocSetResult) res[2];
             set = result3.docSet;
