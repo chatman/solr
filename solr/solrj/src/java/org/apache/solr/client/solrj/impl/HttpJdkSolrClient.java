@@ -38,7 +38,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -52,8 +51,6 @@ import org.apache.solr.client.solrj.SolrRequest;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.request.QueryRequest;
 import org.apache.solr.client.solrj.request.RequestWriter;
-import org.apache.solr.client.solrj.util.AsyncListener;
-import org.apache.solr.client.solrj.util.Cancellable;
 import org.apache.solr.client.solrj.util.ClientUtils;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.params.ModifiableSolrParams;
@@ -83,7 +80,7 @@ public class HttpJdkSolrClient extends HttpSolrClientBase {
 
   private boolean forceHttp11;
 
-  private final boolean shutdownExecutor;
+  private boolean shutdownExecutor;
 
   protected HttpJdkSolrClient(String serverBaseUrl, HttpJdkSolrClient.Builder builder) {
     super(serverBaseUrl, builder);
@@ -137,76 +134,7 @@ public class HttpJdkSolrClient extends HttpSolrClientBase {
   }
 
   @Override
-  public Cancellable asyncRequest(
-      SolrRequest<?> solrRequest,
-      String collection,
-      AsyncListener<NamedList<Object>> asyncListener) {
-    try {
-      PreparedRequest pReq = prepareRequest(solrRequest, collection);
-      asyncListener.onStart();
-      CompletableFuture<NamedList<Object>> response =
-          httpClient
-              .sendAsync(pReq.reqb.build(), HttpResponse.BodyHandlers.ofInputStream())
-              .thenApply(
-                  httpResponse -> {
-                    try {
-                      return processErrorsAndResponse(
-                          solrRequest, pReq.parserToUse, httpResponse, pReq.url);
-                    } catch (SolrServerException e) {
-                      throw new RuntimeException(e);
-                    }
-                  })
-              .whenComplete(
-                  (nl, t) -> {
-                    if (t != null) {
-                      asyncListener.onFailure(t);
-                    } else {
-                      asyncListener.onSuccess(nl);
-                    }
-                  });
-      return new HttpSolrClientCancellable(response);
-    } catch (Exception e) {
-      asyncListener.onFailure(e);
-      return () -> {};
-    }
-  }
-
-  @Override
   public NamedList<Object> request(SolrRequest<?> solrRequest, String collection)
-      throws SolrServerException, IOException {
-    PreparedRequest pReq = prepareRequest(solrRequest, collection);
-    HttpResponse<InputStream> response = null;
-    try {
-      response = httpClient.send(pReq.reqb.build(), HttpResponse.BodyHandlers.ofInputStream());
-      return processErrorsAndResponse(solrRequest, pReq.parserToUse, response, pReq.url);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new RuntimeException(e);
-    } catch (HttpTimeoutException e) {
-      throw new SolrServerException(
-          "Timeout occurred while waiting response from server at: " + pReq.url, e);
-    } catch (SolrException se) {
-      throw se;
-    } catch (RuntimeException re) {
-      throw new SolrServerException(re);
-    } finally {
-      if (pReq.contentWritingFuture != null) {
-        pReq.contentWritingFuture.cancel(true);
-      }
-
-      // See
-      // https://docs.oracle.com/en/java/javase/17/docs/api/java.net.http/java/net/http/HttpResponse.BodySubscribers.html#ofInputStream()
-      if (!wantStream(pReq.parserToUse)) {
-        try {
-          response.body().close();
-        } catch (Exception e1) {
-          // ignore
-        }
-      }
-    }
-  }
-
-  private PreparedRequest prepareRequest(SolrRequest<?> solrRequest, String collection)
       throws SolrServerException, IOException {
     checkClosed();
     if (ClientUtils.shouldApplyDefaultCollection(collection, solrRequest)) {
@@ -215,19 +143,19 @@ public class HttpJdkSolrClient extends HttpSolrClientBase {
     String url = getRequestPath(solrRequest, collection);
     ResponseParser parserToUse = responseParser(solrRequest);
     ModifiableSolrParams queryParams = initalizeSolrParams(solrRequest, parserToUse);
-    var reqb = HttpRequest.newBuilder();
-    PreparedRequest pReq = null;
+    HttpResponse<InputStream> resp = null;
     try {
+      var reqb = HttpRequest.newBuilder();
       switch (solrRequest.getMethod()) {
         case GET:
           {
-            pReq = prepareGet(url, reqb, solrRequest, queryParams);
+            resp = doGet(url, reqb, solrRequest, queryParams);
             break;
           }
         case POST:
         case PUT:
           {
-            pReq = preparePutOrPost(url, solrRequest.getMethod(), reqb, solrRequest, queryParams);
+            resp = doPutOrPost(url, solrRequest.getMethod(), reqb, solrRequest, queryParams);
             break;
           }
         default:
@@ -235,34 +163,50 @@ public class HttpJdkSolrClient extends HttpSolrClientBase {
             throw new IllegalStateException("Unsupported method: " + solrRequest.getMethod());
           }
       }
+      return processErrorsAndResponse(solrRequest, parserToUse, resp, url);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new RuntimeException(e);
+    } catch (HttpTimeoutException e) {
+      throw new SolrServerException(
+          "Timeout occurred while waiting response from server at: " + url, e);
+    } catch (SolrException se) {
+      throw se;
     } catch (URISyntaxException | RuntimeException re) {
       throw new SolrServerException(re);
+    } finally {
+      // See
+      // https://docs.oracle.com/en/java/javase/17/docs/api/java.net.http/java/net/http/HttpResponse.BodySubscribers.html#ofInputStream()
+      if (!wantStream(parserToUse)) {
+        try {
+          resp.body().close();
+        } catch (Exception e1) {
+          // ignore
+        }
+      }
     }
-    pReq.parserToUse = parserToUse;
-    pReq.url = url;
-    return pReq;
   }
 
-  private PreparedRequest prepareGet(
+  private HttpResponse<InputStream> doGet(
       String url,
       HttpRequest.Builder reqb,
       SolrRequest<?> solrRequest,
       ModifiableSolrParams queryParams)
-      throws IOException, URISyntaxException {
+      throws IOException, InterruptedException, URISyntaxException {
     validateGetRequest(solrRequest);
     reqb.GET();
     decorateRequest(reqb, solrRequest);
     reqb.uri(new URI(url + "?" + queryParams));
-    return new PreparedRequest(reqb, null);
+    return httpClient.send(reqb.build(), HttpResponse.BodyHandlers.ofInputStream());
   }
 
-  private PreparedRequest preparePutOrPost(
+  private HttpResponse<InputStream> doPutOrPost(
       String url,
       SolrRequest.METHOD method,
       HttpRequest.Builder reqb,
       SolrRequest<?> solrRequest,
       ModifiableSolrParams queryParams)
-      throws IOException, URISyntaxException {
+      throws IOException, InterruptedException, URISyntaxException {
 
     final RequestWriter.ContentWriter contentWriter = requestWriter.getContentWriter(solrRequest);
 
@@ -330,21 +274,15 @@ public class HttpJdkSolrClient extends HttpSolrClientBase {
     URI uriWithQueryParams = new URI(url + "?" + queryParams);
     reqb.uri(uriWithQueryParams);
 
-    return new PreparedRequest(reqb, contentWritingFuture);
-  }
-
-  private static class PreparedRequest {
-    Future<?> contentWritingFuture;
-    HttpRequest.Builder reqb;
-
-    ResponseParser parserToUse;
-
-    String url;
-
-    PreparedRequest(HttpRequest.Builder reqb, Future<?> contentWritingFuture) {
-      this.reqb = reqb;
-      this.contentWritingFuture = contentWritingFuture;
+    HttpResponse<InputStream> response;
+    try {
+      response = httpClient.send(reqb.build(), HttpResponse.BodyHandlers.ofInputStream());
+    } finally {
+      if (contentWritingFuture != null) {
+        contentWritingFuture.cancel(true);
+      }
     }
+    return response;
   }
 
   /**
@@ -529,23 +467,6 @@ public class HttpJdkSolrClient extends HttpSolrClientBase {
         .filter(Objects::nonNull)
         .map(s -> s.toLowerCase(Locale.ROOT).trim())
         .collect(Collectors.joining(", "));
-  }
-
-  protected static class HttpSolrClientCancellable implements Cancellable {
-    private final CompletableFuture<NamedList<Object>> response;
-
-    protected HttpSolrClientCancellable(CompletableFuture<NamedList<Object>> response) {
-      this.response = response;
-    }
-
-    @Override
-    public void cancel() {
-      response.cancel(true);
-    }
-
-    protected CompletableFuture<NamedList<Object>> getResponse() {
-      return response;
-    }
   }
 
   public static class Builder
