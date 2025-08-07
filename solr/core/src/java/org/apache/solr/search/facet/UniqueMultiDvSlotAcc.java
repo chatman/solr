@@ -85,10 +85,12 @@ class UniqueMultiDvSlotAcc extends UniqueSlotAcc {
         arr[slotNum] = bits;
       }
 
-      for (int o = 0; o < subDv.docValueCount(); o++) { // nocommit verify if this is correct
+      for (int o = 0; o < subDv.docValueCount(); o++) {
         int ord = toGlobal == null ? segOrd : (int) toGlobal.get(segOrd);
         bits.set(ord);
-        segOrd = (int) subDv.nextOrd();
+        if (o < subDv.docValueCount() - 1) {
+          segOrd = (int) subDv.nextOrd();
+        }
       }
     }
   }
