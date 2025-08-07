@@ -1181,13 +1181,6 @@
       </analyzer>
     </fieldType>
 
-    <!-- Pre-analyzed field type, allows inserting arbitrary token streams and stored values. -->
-    <fieldType name="preanalyzed" class="solr.PreAnalyzedField">
-      <!-- PreAnalyzedField's builtin index analyzer just decodes the pre-analyzed token stream. -->
-      <analyzer type="query">
-        <tokenizer name="whitespace"/>
-      </analyzer>
-    </fieldType>
 
   <!-- Similarity is the scoring routine for each document vs. a query.
        A custom Similarity or SimilarityFactory may be specified here, but
